@@ -1,0 +1,170 @@
+---
+title: "Assignment 1 - Language Development in ASD - part 4"
+author: "Riccardo Fusaroli"
+date: "August 10, 2017"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Welcome to the fourth exciting part of the Language Development in ASD exercise
+
+In this exercise we will assess how many participants we would need to adequately replicate our findings (ensuring our sample size is adequate, our alpha at 0.05 and our beta at 0.8).
+
+### Exercise 1
+
+How much power does your study have (if your model estimates are quite right)?
+- [GitHub]Load your dataset, fit your favorite model, assess power for your main effects and interactions of interest.
+- Report the power analysis and comment on what you can (or cannot) use its estimates for.
+
+
+```{r}
+library(dplyr)
+library(ggplot2) 
+library(lme4)
+library(pastecs)
+library(stringr)
+library(simr)
+library(MASS)
+
+
+setwd("~/Documents/RStudioDocs/Assignment 1")
+data = read.csv("AutismWithAvg.csv")
+model = lmer(CHI_MLU ~ Visit + MOT_MLU + verbalIQ + (1 + Visit|ID), data = traindata)
+
+library(pacman)
+p_load(simr, tidyverse, lme4, lmerTest)
+
+powerV = powerSim(model,fixed("Visit"),nsim=200)
+powerV
+# power = 100, fixed effect for visit = 0.19 
+
+powerM = powerSim(model,fixed("MOT_MLU"),nsim=200)
+powerM
+# power = 100, fixed effect size 0.34
+
+powerIQ = powerSim(model,fixed("verbalIQ"),nsim=200)
+powerIQ 
+# power = 100, fixed effect size = 0.065 
+```
+
+For visit, there was a power of 100, with an effect size of 0.19, which is moderate. For Mother MLU, there was a power of 100, and a fixed effect size of 0.34, a moderate effect size. For verbal IQ, there was a power of 100 and a fixed effect size of 0.065, a small effect size. From these power simulations we can see what effect sizes we can expect with a power of 100 over 200 simulations. These values indicate what thresholds to set for these variables when running a power analysis on simulated data.  
+
+
+### Exercise 2
+How would you perform a more conservative power analysis?
+- Identify and justify a minimum effect size for each of your relevant effects
+- [GitHub] take the model from exercise 1 and replace the effects with the minimum effect size that you'd accept.
+- [GitHub] assess the power curve by Child.ID, identifying an ideal number of participants to estimate each effect
+- Report the power analysis and comment on what you can (or cannot) use its estimates for.
+
+
+
+```{r}
+
+## EXERCISE 2 
+
+### Riccardo's clumsy function to simulate new participants
+### TO DO points are only notes for myself, so not part of the assignment
+createNewData <- function (participants,visits,model){
+  # participants is the number of subjects
+  # visits is the number of visits
+  # TO DO: LOOP THROUGH ALL FE ROWS AND AUTOMATICALLY EXTRACT NAMES OF FIXED EFFECTS AND ESTIMATES
+  fe <- fixef(model)
+  Intercept <- fe[1] #intercept
+  bVisit <- fe[2] #visit
+  bDiagnosis <- fe[3] #diagnosis
+  bMOT_MLU <- fe[4] # MOT MLU 
+  # TO DO: INTEGRATE STANDARD ERROR?
+  
+  # TO DO: LOOP THROUGH ALL VC COMPONENTS AND AUTOMATICALLY EXTRACT NAMES OF EFFECTS AND ESTIMATES
+  vc<-VarCorr(model) # variance component
+  sigmaSubject <- as.numeric(attr(vc[[1]],"stddev")[1]) # random intercept by subject
+  sigmaVisit <- as.numeric(attr(vc[[1]],"stddev")[2]) # random slope of visit over subject
+  sigmaResiduals <- as.numeric(attr(vc,"sc"))
+  sigmaCorrelation <- as.numeric(attr(vc[[1]],"correlation")[2])
+  
+  # Create an empty dataframe
+  d=expand.grid(Visit=1:visits,ID=1:participants)
+  # Randomly sample from a binomial (to generate the diagnosis)
+  condition <- sample(rep(0:1, participants/2))
+  d$Diagnosis<-condition[d$ID]
+  d$Diagnosis[is.na(d$Diagnosis)]<-1
+  
+  ## Define variance covariance matrices:
+  Sigma.u<-matrix(c(sigmaSubject^2,
+                    sigmaCorrelation*sigmaSubject*sigmaVisit,
+                    sigmaCorrelation*sigmaSubject*sigmaVisit,
+                    sigmaVisit^2),nrow=2)
+  
+  ## generate new fake participants (column1=RandomIntercept, column2=RandomSlope)
+  u<-mvrnorm(n=participants,
+             mu=c(0,0),Sigma=cov(ranef(model)$ID))
+  
+  ## now generate fake data:
+  ### the outcome is extracted from a gaussian with
+  ### the solution to the model's equation as mean and
+  ### the residual standard deviation as standard deviation 
+  d$CHI_MLU <- rnorm(participants*visits,
+                     (Intercept+u[,1]) +
+                     (bVisit+u[,2])*d$Visit + 
+                     bDiagnosis*d$Diagnosis ,sigmaResiduals)  
+  
+  return(d)
+}
+
+
+summary(model)
+
+# acceptable thresholds 
+fixef(model)["Visit"] <- 0.15
+fixef(model)["MOT_MLU"] <- 0.20
+fixef(model)["verbalIQ"] <- 0.05
+
+# assessing power curve 
+# power curve 
+powerCurveV = powerCurve(model,fixed("Visit"),along="ID", nsim=200) 
+powerCurveV
+plot(powerCurveV)
+
+powerCurveM = powerCurve(model,fixed("MOT_MLU"),along="ID", nsim=200) 
+powerCurveM
+plot(powerCurveM)
+
+powerCurveIQ = powerCurve(model, fixed("verbalIQ"), along="ID", nsim=200)
+powerCurveIQ
+plot(powerCurveIQ)
+
+```
+We are making it more conservative by performing an analysis on a power curve model, which performs a power analysis on simulated data. So instead of testing the model on the data we made the model from, it is tested on new data. 
+For Visit, we need 16 participants for a power above 80. 
+For MOT_MLU, we need 29 participants for a power above 80. 
+For Verbal IQ, we need 16 participants for a power abover 80. 
+
+
+### Exercise 3
+
+Assume you have only the resources to collect 30 kids (15 with ASD and 15 TDs). Identify the power for each relevant effect and discuss whether it's worth to run the study and why.
+
+```{r}
+# Use Riccardos code to create new data 
+
+newdata30 = createNewData(30,6,model)
+newdata30
+
+# Identify the power 
+model30 = lmer(CHI_MLU ~ Visit + (1+Visit|ID), newdata30, REML = F)
+power30 = powerSim(model30, fixed("Visit"), nsim = 200)
+power30 
+
+powerCurve30 = powerCurve(model30, fixed("Visit"), along = "ID", nsim = 200)
+powerCurve30
+plot(powerCurve30)
+
+
+```
+
+
+
